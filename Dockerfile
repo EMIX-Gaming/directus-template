@@ -11,7 +11,7 @@ COPY ./extensions/ /app/extensions/
 
 RUN apk --no-cache add python3 build-base \
   	&& ln -sf /usr/bin/python3 /usr/bin/python \
-    && npm ci \
+    && npm install \
     && npm run build \
     && chown node:node /app
 
