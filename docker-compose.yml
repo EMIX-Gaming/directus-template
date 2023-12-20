@@ -1,0 +1,227 @@
+
+version: '3'
+
+volumes:
+  redis:
+    driver: local
+  minio:
+    driver: local
+
+networks:
+  directus:
+    driver: bridge
+
+services:
+  directus:
+    # image: directus/directus:10.8.2
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - 8055:8055
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - directus
+    volumes:
+      - ./.directus/:/app/.directus/
+      - ./database/:/app/database/
+      - ./uploads/:/app/uploads/
+      # - ./extensions/my-extension/:/app/extensions/my-extension/
+    environment:
+      LOG_LEVEL: warn
+      LOG_STYLE: pretty
+
+      MAX_PAYLOAD_SIZE: 100mb
+      FILES_MAX_UPLOAD_SIZE: 100mb
+      CORS_ENABLED: true
+      CORS_ORIGIN: true
+      MAX_RELATIONAL_DEPTH: 100
+      QUERY_LIMIT_DEFAULT: 20
+      QUERY_LIMIT_MAX: 1000
+      TELEMETRY: false
+
+      WEBSOCKETS_ENABLED: true
+      WEBSOCKETS_GRAPHQL_ENABLED: false
+
+      SYNCHRONIZATION_STORE: redis
+      MESSENGER_STORE: redis
+
+      # EXTENSIONS_CACHE_TTL: 5m
+      EXTENSIONS_AUTO_RELOAD: true
+
+      CONTENT_SECURITY_POLICY_DIRECTIVES__FRAME_SRC: "127.0.0.1:3000"
+
+      KEY: "cc0e393d-4f65-462c-b08a-50043d3b9190"
+      SECRET: "JEsqqc5YsyQRwag_RadKjToLGT2aETMc"
+      ADMIN_EMAIL: "admin@example.com"
+      ADMIN_PASSWORD: "d1r3ctu5"
+
+      ACCESS_TOKEN_TTL: "24h"
+      REFRESH_TOKEN_TTL: "30d"
+
+      CACHE_ENABLED: false
+      CACHE_TTL: 5m
+      CACHE_STORE: redis
+
+      CACHE_SCHEMA: false
+      CACHE_PERMISSIONS: false
+      CACHE_SYSTEM_TTL: 5m
+
+      RATE_LIMITER_ENABLED: false
+      RATE_LIMITER_STORE: redis
+      RATE_LIMITER_GLOBAL_ENABLED: false
+      RATE_LIMITER_GLOBAL_STORE: redis
+
+      ASSETS_CACHE_TTL: "30d"
+
+      STORAGE_LOCATIONS: local,private,public,backup
+
+      STORAGE_LOCAL_ROOT: "./uploads"
+
+      STORAGE_PRIVATE_DRIVER: s3
+      STORAGE_PUBLIC_DRIVER: s3
+      STORAGE_BACKUP_DRIVER: s3
+      STORAGE_LOCAL_DRIVER: local
+
+      STORAGE_PRIVATE_KEY: "minioo"
+      STORAGE_PRIVATE_SECRET: "minioosecretkey"
+      STORAGE_PRIVATE_BUCKET: "private-directus"
+      STORAGE_PRIVATE_ENDPOINT: "minio:9000"
+      STORAGE_PRIVATE_REGION: "us-east-1"
+      STORAGE_PRIVATE_ACL: "private"
+      STORAGE_PRIVATE_USE_PATH_STYLE_ENDPOINT: true
+
+      STORAGE_PUBLIC_KEY: "minioo"
+      STORAGE_PUBLIC_SECRET: "minioosecretkey"
+      STORAGE_PUBLIC_BUCKET: "public-directus"
+      STORAGE_PUBLIC_ENDPOINT: "minio:9000"
+      STORAGE_PUBLIC_REGION: "us-east-1"
+      STORAGE_PUBLIC_ACL: "public-read"
+      STORAGE_PUBLIC_USE_PATH_STYLE_ENDPOINT: true
+
+      STORAGE_BACKUP_KEY: "minioo"
+      STORAGE_BACKUP_SECRET: "minioosecretkey"
+      STORAGE_BACKUP_BUCKET: "backup-directus"
+      STORAGE_BACKUP_ENDPOINT: "minio:9000"
+      STORAGE_BACKUP_REGION: "us-east-1"
+      STORAGE_BACKUP_ACL: "private"
+      STORAGE_BACKUP_USE_PATH_STYLE_ENDPOINT: true
+
+      REDIS: "redis://redis:6379"
+      DB_CLIENT: "pg"
+      DB_HOST: "postgres"
+      DB_PORT: "5432"
+      DB_DATABASE: "directus"
+      DB_USER: "directus"
+      DB_PASSWORD: "directus"
+    deploy:
+      mode: replicated
+      replicas: 1
+      rollback_config:
+        delay: 0s
+        parallelism: 1
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        delay: 0s
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        monitor: 60s
+        max_failure_ratio: 0.3
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8055/server/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: >
+      sh -c "
+        npx directus bootstrap ; \
+        npx directus database migrate:latest ; \
+        npx directus start
+      "
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - directus
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgis/postgis:15-3.4
+    # Required when running on platform other than amd64, like Apple M1/M2:
+    platform: linux/amd64
+    volumes:
+      - ./database:/var/lib/postgresql/data
+    networks:
+      - directus
+    environment:
+      POSTGRES_USER: "directus"
+      POSTGRES_PASSWORD: "directus"
+      POSTGRES_DB: "directus"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "directus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2023-11-20T22-40-07Z
+    # Required when running on platform other than amd64, like Apple M1/M2:
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - 9000:9000
+      - 9001:9001
+      - 9090:9090
+    networks:
+      - directus
+    volumes:
+      - minio:/data
+    environment:
+      MINIO_ROOT_USER: "minioo"
+      MINIO_ROOT_PASSWORD: "minioosecretkey"
+    command: server --console-address ":9001" /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  createbuckets:
+    image: minio/mc
+    networks:
+      - directus
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        /usr/bin/mc alias set minioalias http://minio:9000 minioo minioosecretkey;
+        /usr/bin/mc mb minioalias/private-directus;
+        /usr/bin/mc policy set private minioalias/private-directus;
+        /usr/bin/mc mb minioalias/public-directus;
+        /usr/bin/mc policy set public-read minioalias/public-directus;
+        /usr/bin/mc mb minioalias/backup-directus;
+        /usr/bin/mc policy set private minioalias/backup-directus;
+        exit 0;
+      "

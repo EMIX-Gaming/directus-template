@@ -1,0 +1,266 @@
+#!/usr/bin/env sh
+
+UNAMEOUT="$(uname -s)"
+
+# Verify operating system is supported...
+case "${UNAMEOUT}" in
+    Linux*)             MACHINE=linux;;
+    Darwin*)            MACHINE=mac;;
+    *)                  MACHINE="UNKNOWN"
+esac
+
+if [ "$MACHINE" == "UNKNOWN" ]; then
+    echo "Unsupported operating system [$(uname -s)]. Directus supports macOS, Linux, and Windows (WSL2)." >&2
+
+    exit 1
+fi
+
+# Determine if stdout is a terminal...
+if test -t 1; then
+    # Determine if colors are supported...
+    ncolors=$(tput colors)
+
+    if test -n "$ncolors" && test "$ncolors" -ge 8; then
+        BOLD="$(tput bold)"
+        YELLOW="$(tput setaf 3)"
+        GREEN="$(tput setaf 2)"
+        NC="$(tput sgr0)"
+    fi
+fi
+
+# Function that prints the available commands...
+function display_help {
+    echo "Directus Binary"
+    echo
+    echo "${YELLOW}Usage:${NC}" >&2
+    echo "  directus COMMAND [options] [arguments]"
+    echo
+    echo "Unknown commands are passed to the docker-compose binary."
+    echo
+    echo "${YELLOW}docker-compose Commands:${NC}"
+    echo "  ${GREEN}directus up${NC}        Start the application"
+    echo "  ${GREEN}directus up -d${NC}     Start the application in the background"
+    echo "  ${GREEN}directus stop${NC}      Stop the application"
+    echo "  ${GREEN}directus restart${NC}   Restart the application"
+    echo "  ${GREEN}directus ps${NC}        Display the status of all containers"
+    echo
+    echo "${YELLOW}Node Commands:${NC}"
+    echo "  ${GREEN}directus node ...${NC}         Run a Node command"
+    echo "  ${GREEN}directus node --version${NC}"
+    echo
+    echo "${YELLOW}NPM Commands:${NC}"
+    echo "  ${GREEN}directus npm ...${NC}        Run a npm command"
+    echo "  ${GREEN}directus npx${NC}            Run a npx command"
+    echo "  ${GREEN}directus npm run prod${NC}"
+    echo
+    echo "${YELLOW}PNPM Commands:${NC}"
+    echo "  ${GREEN}directus pnpm ...${NC}        Run a pnpm command"
+    echo "  ${GREEN}directus pnpx${NC}            Run a pnpx command"
+    echo "  ${GREEN}directus pnpm run prod${NC}"
+    echo
+    echo "${YELLOW}Container CLI:${NC}"
+    echo "  ${GREEN}directus shell${NC}        Start a shell session within the application container"
+    echo "  ${GREEN}directus bash${NC}         Alias for 'directus shell'"
+    echo "  ${GREEN}directus root-shell${NC}   Start a root shell session within the application container"
+    echo "  ${GREEN}directus root-bash${NC}    Alias for 'directus root-shell'"
+    echo
+    echo "  ${GREEN}directus build --no-cache${NC}       Rebuild all of the Directus containers"
+
+    exit 1
+}
+
+# Proxy the "help" command...
+if [ $# -gt 0 ]; then
+    if [ "$1" == "help" ] || [ "$1" == "-h" ] || [ "$1" == "-help" ] || [ "$1" == "--help" ]; then
+        display_help
+    fi
+else
+    display_help
+fi
+
+# Source the ".env" file so Directus's environment variables are available...
+if [ ! -z "$APP_ENV" ] && [ -f ./.env.$APP_ENV ]; then
+  source ./.env.$APP_ENV;
+elif [ -f ./.env ]; then
+  source ./.env;
+fi
+
+# Define environment variables...
+export APP_PORT=${APP_PORT:-80}
+export APP_SERVICE=${APP_SERVICE:-"directus"}
+export DB_PORT=${DB_PORT:-3306}
+export WWWUSER=${WWWUSER:-$UID}
+export WWWGROUP=${WWWGROUP:-$(id -g)}
+
+export DIRECTUS_FILES=${DIRECTUS_FILES:-""}
+
+# Function that outputs Directus is not running...
+function directus_is_not_running {
+    echo "${BOLD}Directus is not running.${NC}" >&2
+    echo "" >&2
+    echo "${BOLD}You may Directus using the following commands:${NC} './directus up' or './directus up -d'" >&2
+
+    exit 1
+}
+
+# Define Docker Compose command prefix...
+docker compose &> /dev/null
+if [ $? == 0 ]; then
+    DOCKER_COMPOSE=(docker compose)
+else
+    DOCKER_COMPOSE=(docker-compose)
+fi
+
+if [ -n "$DIRECTUS_FILES" ]; then
+    # Convert DIRECTUS_FILES to an array...
+    IFS=':' read -ra DIRECTUSL_FILES <<< "$DIRECTUS_FILES"
+
+    for FILE in "${DIRECTUSL_FILES[@]}"; do
+        if [ -f "$FILE" ]; then
+            DOCKER_COMPOSE+=(-f "$FILE")
+        else
+            echo "${BOLD}Unable to find Docker Compose file: '${FILE}'${NC}" >&2
+
+            exit 1
+        fi
+    done
+fi
+
+EXEC="yes"
+
+if [ -z "$DIRECTUS_SKIP_CHECKS" ]; then
+    # Ensure that Docker is running...
+    if ! docker info > /dev/null 2>&1; then
+        echo "${BOLD}Docker is not running.${NC}" >&2
+
+        exit 1
+    fi
+
+    # Determine if Directus is currently up...
+    if "${DOCKER_COMPOSE[@]}" ps "$APP_SERVICE" 2>&1 | grep 'Exit\|exited'; then
+        echo "${BOLD}Shutting down old Directus processes...${NC}" >&2
+
+        "${DOCKER_COMPOSE[@]}" down > /dev/null 2>&1
+
+        EXEC="no"
+    elif [ -z "$("${DOCKER_COMPOSE[@]}" ps -q)" ]; then
+        EXEC="no"
+    fi
+fi
+
+ARGS=()
+
+# Proxy docker-compose commands to the docker-compose binary on the application container...
+if [ "$1" == "docker-compose" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" "${DOCKER_COMPOSE[@]}")
+    else
+        directus_is_not_running
+    fi
+
+# Proxy Node commands to the "node" binary on the application container...
+elif [ "$1" == "node" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" node "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Proxy NPM commands to the "npm" binary on the application container...
+elif [ "$1" == "npm" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" npm "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Proxy NPX commands to the "npx" binary on the application container...
+elif [ "$1" == "npx" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" npx "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Proxy PNPM commands to the "pnpm" binary on the application container...
+elif [ "$1" == "pnpm" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" pnpm "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Proxy PNPX commands to the "pnpx" binary on the application container...
+elif [ "$1" == "pnpx" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" pnpx "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Initiate a Bash shell within the application container...
+elif [ "$1" == "shell" ] || [ "$1" == "bash" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" sh "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Initiate a root user Bash shell within the application container...
+elif [ "$1" == "root-shell" ] || [ "$1" == "root-bash" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u root)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" sh "$@")
+    else
+        directus_is_not_running
+    fi
+
+elif [ "$1" == "run" ]; then
+    shift 1
+
+    if [ "$EXEC" == "yes" ]; then
+        ARGS+=(exec -u node)
+        [ ! -t 0 ] && ARGS+=(-T)
+        ARGS+=("$APP_SERVICE" npx directus "$@")
+    else
+        directus_is_not_running
+    fi
+
+# Pass unknown commands to the "docker-compose" binary...
+else
+    ARGS+=("$@")
+fi
+
+# Run Docker Compose with the defined arguments...
+"${DOCKER_COMPOSE[@]}" "${ARGS[@]}"

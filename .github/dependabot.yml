@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # Autogroup all Github Actions updates in a single PR
+  - package-ecosystem: github-actions
+    groups:
+      actions:
+        patterns: ["*"]
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: "sunday"
+    open-pull-requests-limit: 100
+    rebase-strategy: auto
+    labels:
+      - ecosystem:github-actions
+      - dependabot
+
+  # NPM updates
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 100
+    versioning-strategy: auto
+    rebase-strategy: auto
+    labels:
+      - ecosystem:npm
+      - dependabot
