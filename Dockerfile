@@ -28,8 +28,8 @@ WORKDIR /app
 
 COPY --from=build --chown=node:node /app /app
 
-CMD npx directus bootstrap \
-    && npx directus database migrate:latest \
-    && npx directus start
+CMD npx directus bootstrap ; \
+    npx directus database migrate:latest ; \
+    npx directus start
 
 EXPOSE 8055
