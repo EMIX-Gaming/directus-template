@@ -7,11 +7,11 @@ COPY package.json package-lock.json /app/
 COPY .directus/ /app/.directus
 COPY ./extensions/ /app/extensions/
 
-RUN apk --no-cache add python3 build-base ; \
-  	ln -sf /usr/bin/python3 /usr/bin/python ; \
-    npm ci ; \
-    npm run build ; \
-    chown node:node /app
+RUN apk --no-cache add python3 build-base \
+  	&& ln -sf /usr/bin/python3 /usr/bin/python \
+    && npm ci \
+    && npm run build \
+    && chown node:node /app
 
 FROM --platform=${TARGETPLATFORM} node:${NODE_VERSION}-alpine
 
@@ -24,8 +24,8 @@ ENV NODE_ENV=${NODE_ENV}
 
 COPY --from=build --chown=node:node /app /app
 
-CMD npx directus bootstrap ; \
-    npx directus database migrate:latest ; \
-    npx directus start
+CMD npx directus bootstrap \
+    && npx directus database migrate:latest \
+    && npx directus start
 
 EXPOSE 8055
