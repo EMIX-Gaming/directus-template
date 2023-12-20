@@ -3,6 +3,8 @@ ARG NODE_ENV="development"
 
 FROM --platform=${BUILDPLATFORM} node:${NODE_VERSION}-alpine as build
 
+WORKDIR /app
+
 COPY package.json package-lock.json /app/
 COPY .directus/ /app/.directus
 COPY ./extensions/ /app/extensions/
@@ -21,6 +23,8 @@ LABEL org.opencontainers.image.revision=${COMMIT_SHA}
 LABEL org.opencontainers.image.vendor="EMIX Gaming"
 
 ENV NODE_ENV=${NODE_ENV}
+
+WORKDIR /app
 
 COPY --from=build --chown=node:node /app /app
 
