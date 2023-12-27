@@ -13,7 +13,7 @@ networks:
 
 services:
   directus:
-    # image: directus/directus:10.8.2
+    image: directus-template:local
     build:
       context: .
       dockerfile: Dockerfile
