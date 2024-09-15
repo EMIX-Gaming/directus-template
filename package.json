@@ -18,7 +18,7 @@
   "workspaces": [],
   "dependencies": {
     "directus": "^10.7.2",
-    "directus-extension-api-docs": "^1.7.5",
+    "directus-extension-api-docs": "^2.1.4",
     "directus-extension-computed-interface": "^1.9.0",
     "directus-extension-filters-interface": "^1.5.0",
     "directus-extension-flow-manager": "^1.2.3",
